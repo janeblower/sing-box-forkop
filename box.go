@@ -736,6 +736,11 @@ func (s *Box) Release() error {
 	return E.Errors(errors...)
 }
 
+// ConnectionCount is the number of connections the instance serves.
+func (s *Box) ConnectionCount() int {
+	return s.connection.Count()
+}
+
 // CloseReleasedListeners closes the listeners Release gave up that the instance taking over
 // did not take, once it has started.
 func (s *Box) CloseReleasedListeners() error {
