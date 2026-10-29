@@ -710,6 +710,26 @@ func (s *Box) Close() error {
 	return s.scope.Close()
 }
 
+// Release lets go of what only one instance may hold, so that the instance taking over can
+// start beside this one, which goes on serving the connections it has: the endpoints, whose
+// ports and node state the other would contend for, the fakeip address tables, and the cache
+// file. Until the other takes the listeners, this one gives out no new fakeip address.
+func (s *Box) Release() error {
+	errors := []error{s.scope.Remove(s.endpoint)}
+	for _, transport := range s.dnsTransport.Transports() {
+		fakeIPTransport, isFakeIP := transport.(adapter.FakeIPTransport)
+		if isFakeIP {
+			errors = append(errors, fakeIPTransport.Store().Close())
+		}
+	}
+	for _, internalService := range s.internalService {
+		if _, isCacheFile := internalService.(adapter.CacheFile); isCacheFile {
+			errors = append(errors, s.scope.Remove(internalService))
+		}
+	}
+	return E.Errors(errors...)
+}
+
 func (s *Box) Network() adapter.NetworkManager {
 	return s.network
 }
