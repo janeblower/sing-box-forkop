@@ -3,6 +3,7 @@ package box_test
 import (
 	"context"
 	"fmt"
+	"net"
 	"path/filepath"
 	"testing"
 	"time"
@@ -55,5 +56,35 @@ func TestReleaseHandsOverCacheFileAndFakeIP(t *testing.T) {
 	domain, loaded := fakeIPStore(t, ctx).Lookup(address)
 	require.True(t, loaded)
 	require.Equal(t, "example.com", domain)
+	require.NoError(t, released.Close())
+}
+
+// The instance taking over gets the sockets of the released one's listeners, where binding
+// the address again would fail; a socket nobody took closes once it has started.
+func TestReleaseHandsOverListeners(t *testing.T) {
+	freePort := func() int {
+		probe, err := net.Listen("tcp4", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer probe.Close()
+		return probe.Addr().(*net.TCPAddr).Port
+	}
+	inbound := func(tag string, port int) string {
+		return fmt.Sprintf(`{"type": "mixed", "tag": %q, "listen": "127.0.0.1", "listen_port": %d}`, tag, port)
+	}
+	config := func(inbounds string) string {
+		return fmt.Sprintf(`{"log": {"disabled": true}, "inbounds": [%s]}`, inbounds)
+	}
+	kept, dropped := freePort(), freePort()
+	released, _ := startBox(t, config(inbound("kept", kept)+", "+inbound("dropped", dropped)))
+	require.NoError(t, released.Release())
+
+	startBox(t, config(inbound("kept", kept)))
+	require.NoError(t, released.CloseReleasedListeners())
+	conn, err := net.Dial("tcp4", fmt.Sprintf("127.0.0.1:%d", kept))
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	probe, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", dropped))
+	require.NoError(t, err)
+	require.NoError(t, probe.Close())
 	require.NoError(t, released.Close())
 }
